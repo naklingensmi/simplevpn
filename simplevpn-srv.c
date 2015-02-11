@@ -612,9 +612,7 @@ int main(int argc, char ** argv)
 		newclient->inet_ip = remote.sin_addr.s_addr;
 		
 		// Link newclient into list of assoc'd clients.
-		fprintf(stderr, "[main] Attempting to lock client_list_mutex\n");
 		pthread_mutex_lock(&client_list_mutex);
-		fprintf(stderr, "[main] Successful\n");
 		newclient->next = client_list;
 		client_list = newclient;
 		newclient->prev = (struct client*)&client_list;

@@ -5,6 +5,7 @@ Neil Klingensmith
 2013-09-14
 
 naklingensmi at wisc dot edu
+http://pages.cs.wisc.edu/~klingens
 
 This pair of programs provides simple IP-in-TCP traffic tunneling, similar to
 OpenVPN. It uses the linux tun driver, which allows a program to generate
