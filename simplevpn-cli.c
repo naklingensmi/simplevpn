@@ -208,6 +208,65 @@ static int set_ip(const char *name, unsigned int ip, unsigned int mask)
 	return 0;
 }
 
+int register_static_ip(int net_fd, int ip, char *devname)
+{
+	char *buffer;
+
+	// Static IP
+	buffer = malloc(100);
+	struct ip_header *iphdr = (struct ip_header*)buffer;
+	memset(buffer,0,100);
+	iphdr->vers = 0x45;
+	iphdr->ip_header_len = 20;
+	iphdr->ttl = 64;
+	iphdr->source_ip = ip;
+	if(cwrite(net_fd, buffer, 20) <= 0)
+	{
+		printf("error: write failed while requesting static IP address from server.\n");
+		exit(1);
+	}
+	cread(net_fd, buffer, 100) ;
+	printf("Got IP response: %08x\n", ntohl(iphdr->dest_ip)) ;
+
+	set_ip(devname, ntohl(iphdr->dest_ip), 0xffff0000);
+	if(add_host_route(devname, (in_addr_t)ntohl(iphdr->dest_ip)) < 0)
+		printf("add_host_route returned\n");
+
+	// Set the interface address.
+	free(buffer) ;
+
+	return 0;
+}
+
+
+int get_ip_from_server(int net_fd, char *devname)
+{
+	char *buffer;
+
+	// Get IP Address from server
+	buffer = malloc(100) ;
+	struct ip_header *iphdr = (struct ip_header*)buffer ;
+	memset(buffer,0,100) ;
+	iphdr->vers = 0x45 ;
+	iphdr->ip_header_len = 20 ;
+	iphdr->ttl = 64;
+	if(cwrite(net_fd, buffer, 20) <= 0)
+	{
+		printf("error: write failed while getting IP address from server\n");
+		exit(1);
+	}
+
+	cread(net_fd, buffer, 100) ;
+	printf("Got IP response: %08x\n", ntohl(iphdr->dest_ip)) ;
+
+	set_ip(devname, ntohl(iphdr->dest_ip), 0xffff0000);
+
+	// Set the interface address.
+	free(buffer) ;
+
+	return 0;
+}
+
 /*
  * usage
  *
@@ -288,14 +347,6 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	/* assign the destination address */
-/*
-	memset(&remote, 0, sizeof(remote));
-	remote.sin_family = AF_INET;
-	remote.sin_addr.s_addr = inet_addr(remote_ip);
-	remote.sin_port = htons(port);
-*/
-
 	// Look up the IP address associated with the user-supplied domain
 	memset(hints, 0, sizeof(struct addrinfo));
 	hints->ai_family = AF_UNSPEC;
@@ -324,52 +375,11 @@ int main(int argc, char **argv)
 
 	if(ip == 0)
 	{
-		// Get IP Address from server
-		buffer = malloc(100) ;
-		struct ip_header *iphdr = (struct ip_header*)buffer ;
-		memset(buffer,0,100) ;
-		iphdr->vers = 0x45 ;
-		iphdr->ip_header_len = 20 ;
-		iphdr->ttl = 64;
-		if(cwrite(net_fd, buffer, 20) <= 0)
-		{
-			printf("error: write failed while getting IP address from server\n");
-			exit(1);
-		}
-
-		nread = cread(net_fd, buffer, 100) ;
-		printf("Got IP response: %08x\n", ntohl(iphdr->dest_ip)) ;
-
-		set_ip(devname, ntohl(iphdr->dest_ip), 0xffff0000);
-
-		// Set the interface address.
-		free(buffer) ;
+		get_ip_from_server(net_fd, devname);
 	}
 	else
 	{
-		// Static IP
-		buffer = malloc(100);
-		struct ip_header *iphdr = (struct ip_header*)buffer;
-		memset(buffer,0,100);
-		iphdr->vers = 0x45;
-		iphdr->ip_header_len = 20;
-		iphdr->ttl = 64;
-		iphdr->source_ip = ip;
-		if(cwrite(net_fd, buffer, 20) <= 0)
-		{
-			printf("error: write failed while requesting static IP address from server.\n");
-			exit(1);
-		}
-		nread = cread(net_fd, buffer, 100) ;
-		printf("Got IP response: %08x\n", ntohl(iphdr->dest_ip)) ;
-
-		set_ip(devname, ntohl(iphdr->dest_ip), 0xffff0000);
-		if(add_host_route(devname, (in_addr_t)ntohl(iphdr->dest_ip)) < 0)
-			printf("add_host_route returned\n");
-
-		// Set the interface address.
-		free(buffer) ;
-
+		register_static_ip(net_fd, ip, devname);
 	}
 	int maxfd = (tun_fd > net_fd)?tun_fd:net_fd;
 	
@@ -485,6 +495,9 @@ int main(int argc, char **argv)
 
 	net_fd = sock_fd;
 	printf("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
+
+	// Re-register the IP address with the server after we have reconnected.
+	register_static_ip(net_fd, ip, devname);
 				sleep(2) ;
 				continue ;
 			}
