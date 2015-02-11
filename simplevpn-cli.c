@@ -211,6 +211,7 @@ static int set_ip(const char *name, unsigned int ip, unsigned int mask)
 int register_static_ip(int net_fd, int ip, char *devname)
 {
 	char *buffer;
+	int nread;
 
 	// Static IP
 	buffer = malloc(100);
@@ -225,8 +226,15 @@ int register_static_ip(int net_fd, int ip, char *devname)
 		printf("error: write failed while requesting static IP address from server.\n");
 		exit(1);
 	}
-	cread(net_fd, buffer, 100) ;
-	printf("Got IP response: %08x\n", ntohl(iphdr->dest_ip)) ;
+
+	nread = cread(net_fd, buffer, 100) ;
+
+	if(nread == 0)
+	{
+		// Connection closed while trying to assign a statick IP. This means that someone else already has that address.
+		fprintf(stderr, "ERROR: Requested static IP address already in use.\n");
+		exit(0);
+	}
 
 	set_ip(devname, ntohl(iphdr->dest_ip), 0xffff0000);
 	if(add_host_route(devname, (in_addr_t)ntohl(iphdr->dest_ip)) < 0)
@@ -340,7 +348,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	printf("New tun device = %s\n", devname) ;
+//	printf("New tun device = %s\n", devname) ;
 
 	if ( (sock_fd = socket(AF_INET, socktype, 0)) < 0) {
 		perror("socket()");
@@ -360,7 +368,7 @@ int main(int argc, char **argv)
 	sprintf(port_str, "%d", (int)(port & 0xffff));
 	getaddrinfo(server_domain, port_str, hints, &result);
 	memcpy(&remote, result->ai_addr, sizeof(struct sockaddr_in));
-	printf("domain = %s\nIP = %08x\n", server_domain, ((struct sockaddr_in*)result->ai_addr)->sin_addr.s_addr);
+//	printf("domain = %s\nIP = %08x\n", server_domain, ((struct sockaddr_in*)result->ai_addr)->sin_addr.s_addr);
 
 
 	/* connection request */

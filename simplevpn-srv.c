@@ -254,16 +254,16 @@ void cleanup(struct client *cli)
 	// the address and bitmask since we do this in many places.
 	if((addr == NULL) && ((ntohl(cli->ip) & IP_MASK) == IP_RANGE))
 	{
-		printf("[cleanup] Reclaiming IP\n");
+		fprintf(stderr, "[cleanup] Reclaiming IP\n");
 		// Put the client's address back into the list of free addresses.
 		addr = malloc(sizeof(struct free_ip_addr));
 		addr_iterator = free_ip_addr_list;
 		addr->address = cli->ip;
-		
+
 		while(addr_iterator->next != NULL && ntohl(addr_iterator->next->address) > ntohl(cli->ip))
-		addr_iterator = addr_iterator->next;
-	
-	
+			addr_iterator = addr_iterator->next;
+
+
 		// Link the reclaimed address into the list of free addresses.
 		addr->next = addr_iterator->next;
 		if(addr_iterator->next != NULL)
@@ -277,7 +277,7 @@ void cleanup(struct client *cli)
 	}
 	else
 	{
-		printf("[cleanup] Problem reclaiming IP address %08x\n", ntohl(cli->ip));
+		fprintf(stderr,"[cleanup] Problem reclaiming IP address %08x\n", ntohl(cli->ip));
 	}
 
 	if(cli->next != NULL)
@@ -323,14 +323,12 @@ void *handleConnectionThread(void *c)
 		perror("setsockopt()");
 	}
 
-//	int maxfd = (tun_fd > net_fd)?tun_fd:net_fd;
 	int maxfd = net_fd;	
 	while(1)
 	{
 		fd_set rd_set ;
 
 		FD_ZERO(&rd_set) ;
-//		FD_SET(tun_fd,&rd_set) ;
 		FD_SET(net_fd,&rd_set);
 
 		timeout.tv_sec = 60;
@@ -404,7 +402,6 @@ void *handleConnectionThread(void *c)
 				}
 
 			}
-			
 			if((ntohl(iphdr->source_ip) == 0) && (ntohl(iphdr->dest_ip) == 0))
 			{
 				// Address request.
@@ -435,13 +432,9 @@ void *handleConnectionThread(void *c)
 			{
 				// Static address request.
 				// Find the requested IP address in the list.
-#if 0
-				struct free_ip_addr *addr = free_ip_addr_list;
-				while(addr->address != iphdr->source_ip && addr->next != NULL)
-					addr = addr->next ;
-#endif
+
 				struct free_ip_addr *addr = findFreeAddr(iphdr->source_ip);
-				if(addr->address == iphdr->source_ip)
+				if((addr != NULL) && (addr->address == iphdr->source_ip))
 				{
 					// Unlink the address from the list.
 					addr->prev->next = addr->next;
@@ -459,19 +452,30 @@ void *handleConnectionThread(void *c)
 				else
 				{
 					// Address in use
-					printf("Address already in use: %08x\n", ntohl(iphdr->source_ip));
+					fprintf(stderr,"ERROR: Client requested a static address that is already in use: %08x\n", ntohl(iphdr->source_ip));
 					iphdr->dest_ip = 0 ; // Indicate error
 					iphdr->source_ip = 0 ;
 
-					cli->ip = 0;
+					pthread_mutex_unlock(&client_list_mutex);
+
+					cli->ip = -1;
+					fprintf(stderr, "[handleConnectionThread] Calling cleanup()\n");
+					cleanup(cli);
+					fprintf(stderr, "[handleConnectionThread] Returned from cleanup()\n");
+					free(cli);
+					close(net_fd);
+
+
+					fprintf(stderr, "[handleConnectionThread] Unlocking client_list_mutex\n");
+
+					pthread_exit((void*)1);
 				}
 
 
 				// Acknowledge static IP assignment
 				int err = write(cli->sockfd, buffer, nread);
 				if(err <= 0)
-					printf("nothing written to cli sockfd\n");
-
+					fprintf(stderr,"nothing written to cli sockfd\n");
 
 			}
 			else if((ntohl(iphdr->source_ip) == -1) && (ntohl(iphdr->dest_ip) == -1))
@@ -608,7 +612,9 @@ int main(int argc, char ** argv)
 		newclient->inet_ip = remote.sin_addr.s_addr;
 		
 		// Link newclient into list of assoc'd clients.
+		fprintf(stderr, "[main] Attempting to lock client_list_mutex\n");
 		pthread_mutex_lock(&client_list_mutex);
+		fprintf(stderr, "[main] Successful\n");
 		newclient->next = client_list;
 		client_list = newclient;
 		newclient->prev = (struct client*)&client_list;
