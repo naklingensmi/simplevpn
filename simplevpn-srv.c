@@ -319,7 +319,7 @@ void *handleConnectionThread(void *c)
 	char *buffer ;
 	unsigned short nread;
 	struct timeval timeout;
-
+	int pass = 0;
 
 	timeout.tv_sec = SOCK_TIMEOUT/2;
 	timeout.tv_usec = 0;
@@ -388,6 +388,24 @@ void *handleConnectionThread(void *c)
 			// read packet, four bytes in to buffer to account for packet
 			// information header that gets prepended to every tun packet.
 			nread = read(net_fd, buffer, n);
+
+			if(pass == 0)
+			{
+				char key[16];
+				char *devname = buffer + 16;
+				int i;
+
+				printf("pass 0. Checking for key\n");
+
+				memcpy(key,buffer,16);
+				
+				for(i = 0 ; i < 16 ; i++)
+					printf("%02x ", (int)(key[i] & 0xff));
+
+
+				free(buffer);
+				pass = 1;
+			}
 
 			// When we get a packet from one of the associated VPN
 			// clients, check out list of associated devices to see
@@ -530,23 +548,30 @@ void *handleConnectionThread(void *c)
  * 
  */
 #define KEYFILE_LINE_MAX 2048
-int findKey(int keyfilefd, char *devname, char **key)
+int findKey(FILE *keyfilefd, char *devname, char **key)
 {
-	char *line = malloc(KEYFILE_LINE_MAX);
-	int k;
+	char *devid = malloc(1000);
+	int nargs;
+	
+	while(1)
+	{
+		nargs = fscanf(keyfilefd, "%s %s\n", devid, *key);
 
-	// Seek to beginning of keyfile
-	lseek(keyfilefd, 0, SEEK_SET);
+		if(nargs == EOF)
+			break;
+		else if(nargs != 2)
+			continue;
 
-	read(keyfile, line, KEYFILE_LINE_MAX);
-	k = 0;
-	while(line[k] != ' ' && line[k] != '\t')
-		k++;
+		if(strcmp(devid, devname) == 0)
+		{
+			free(devid);
+			return 0;
+		}
+		printf("nargs = %d devid = \"%s\" devkey = \"%s\"\n", nargs, devid, *key);
+	}
 
-	line[k] = '\0';
-
-	free(line);
-	return 0;
+	free(devid);
+	return -1;
 }
 
 void usage(char *progname)
@@ -569,7 +594,7 @@ int main(int argc, char ** argv)
 	unsigned short port = 2002;
 	unsigned int socktype = SOCK_STREAM;
 	int c;
-	int keyfilefd = 0;
+	FILE *keyfilefd = 0;
 
 	generateFreeIPAddressList(0x0a000001, 0x0a00ffff, 0xfffff000);
 	
@@ -604,11 +629,11 @@ int main(int argc, char ** argv)
 		exit(1);
 	}
 
-	keyfilefd = open(keyfilepath, O_RDONLY);
+	keyfilefd = fopen(keyfilepath, "r");
 	if(keyfilefd < 0)
 	{
-		perror("open()");
-		exit(1);
+		perror("fopen()");
+		exit(1) ;
 	}
 
 	// Set up socket to listen on

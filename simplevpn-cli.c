@@ -285,7 +285,7 @@ void usage(char *progname)
 	printf("%s: simpleVPN client application\n\n", progname);
 	printf("\t-s <server ip>\tRequired. Specify server address\n");
 	printf("\t-a <local ip>\tOptional. Request static address on the VPN\n");
-	printf("\t-p <port>\tOptional. Specify port that the server listens on.\n");
+	printf("\t-p <port>\tOptional. Specify port on which the server listens.\n");
 	printf("\t-u\t\tOptional. Use UDP instead of TCP. NOT IMPLEMENTED.\n");
 
 	printf("\n");
@@ -309,8 +309,10 @@ int main(int argc, char **argv)
 	int c ;
 	struct addrinfo *hints = malloc(sizeof(struct addrinfo));
 	struct addrinfo *result = malloc(sizeof(struct addrinfo));
+	char key[16];
+	char *nodename = NULL;
 
-	while ((c = getopt (argc, argv, "us:a:p:")) != -1)
+	while ((c = getopt (argc, argv, "us:a:p:n:k:")) != -1)
 	{
 		switch (c)
 		{
@@ -326,6 +328,23 @@ int main(int argc, char **argv)
 			break;
 		case 'p':
 			port = atoi(optarg);
+			break;
+		case 'n':
+			nodename = malloc(strlen(optarg) + 2);
+			strcpy(nodename,optarg);
+			break;
+		case 'k':
+			// This doesn't work.
+			for(n = 0 ; n < 16 ; n++)
+			{
+				printf("optarg[%d] = %c\n", 2*n, optarg[2*n]);
+				key[n] = (optarg[2*n] > '9' ? (optarg[2*n] > 'F' ? optarg[2*n] - 'a' : optarg[2*n] - 'A') : optarg[2*n] - '0') << 4;
+				key[n] |= (optarg[2*n+1] > '9' ? (optarg[2*n+1] > 'F' ? optarg[2*n+1] - 'a' : optarg[2*n+1] - 'A') : optarg[2*n+1] - '0');
+			}
+
+			for(n = 0 ; n < 16 ; n++)
+				printf("%02x ", (int)(key[n] & 0xff));
+
 			break;
 		default:
 			usage(argv[0]);
