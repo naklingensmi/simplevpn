@@ -44,6 +44,7 @@ struct client
 	int sockfd;
 	int ip;      // IP Addr on the VPN
 	int inet_ip; // IP Addr on the internet
+	char *key;   // AES Key
 };
 
 struct free_ip_addr
@@ -221,6 +222,13 @@ unsigned int claimIPAddress(struct free_ip_addr *addr)
 {
 	unsigned int claimed_address = 0;
 	
+	fprintf(stderr, "[claimIPAddress] addr = %p\n", addr);
+	if(addr != NULL)
+	{
+		fprintf(stderr, "[claimIPAddress] addr->next = %p\n", addr->next);
+		fprintf(stderr, "[claimIPAddress] addr->prev = %p\n", addr->prev);
+		fprintf(stderr, "[claimIPAddress] addr->address = %08x\n", addr->address);
+	}
 	do{
 		// Unlink the ip address from the free list.
 		if(addr == NULL)
@@ -232,6 +240,10 @@ unsigned int claimIPAddress(struct free_ip_addr *addr)
 
 		claimed_address = addr->address;
 
+		fprintf(stderr, "[claimIPAddress] Freeing addr. addr->address = 0x%08x\n", addr->address);
+		fprintf(stderr, "[claimIPAddress] claimed_address = %08x\n", claimed_address);
+		fprintf(stderr, "[claimIPAddress] IP_MASK = %08x\n", IP_MASK);
+		fprintf(stderr, "[claimIPAddress] IP_RANGE = %08x\n", IP_RANGE);
 		free(addr);
 	}while((claimed_address & IP_MASK) != IP_RANGE);
 
@@ -399,6 +411,7 @@ void *handleConnectionThread(void *c)
 				{
 					printf("Client has self-assigned IP that is in free list: %08x...\n", ntohl(iphdr->source_ip));
 					claimIPAddress(addr);
+					printf("Returned from claimIPAddress\n");
 				}
 
 			}
@@ -510,34 +523,59 @@ void *handleConnectionThread(void *c)
 	}
 }
 
+/*
+ * findKey
+ *
+ * Search keyfilefd for AES key associated with devname.
+ * 
+ */
+#define KEYFILE_LINE_MAX 2048
+int findKey(int keyfilefd, char *devname, char **key)
+{
+	char *line = malloc(KEYFILE_LINE_MAX);
+	int k;
+
+	// Seek to beginning of keyfile
+	lseek(keyfilefd, 0, SEEK_SET);
+
+	read(keyfile, line, KEYFILE_LINE_MAX);
+	k = 0;
+	while(line[k] != ' ' && line[k] != '\t')
+		k++;
+
+	line[k] = '\0';
+
+	free(line);
+	return 0;
+}
 
 void usage(char *progname)
 {
 	printf("%s: simpleVPN client application\n\n", progname);
+	printf("\t-k\t\tRequired. Keyfile location. See README.md for format.\n");
 	printf("\t-u\t\tOptional. Use UDP instead of TCP. Not implemented\n");
 	printf("\t-p <port>\tOptional. Set the local port to listen on.\n");
 	printf("\n");
 }
 
-
-
-
 int main(int argc, char ** argv)
 {
 	char *devname = malloc(50) ;
 	char *str = malloc(50) ;
+	char *keyfilepath = NULL;
 	int net_fd = 0, sock_fd = 0, optval = 1 ;
 	struct sockaddr_in local, remote;
 	socklen_t remotelen;
 	unsigned short port = 2002;
 	unsigned int socktype = SOCK_STREAM;
 	int c;
+	int keyfilefd = 0;
 
 	generateFreeIPAddressList(0x0a000001, 0x0a00ffff, 0xfffff000);
 	
 	pthread_mutex_init(&client_list_mutex, NULL);
 
-	while ((c = getopt (argc, argv, "up:")) != -1)
+	while ((c = getopt (argc, argv, "up:k:")) != -1)
 	{
 		switch (c)
 		{
@@ -548,11 +586,29 @@ int main(int argc, char ** argv)
 		case 'p':
 			port = atoi(optarg);
 			break;
+		case 'k':
+			keyfilepath = malloc(strlen(optarg)+2);
+			strcpy(keyfilepath, optarg);
+			break;
 		default:
 			usage(argv[0]);
 			printf("Unrecognized option %c\n", c);
 			return -1;
 		}
+	}
+
+	if(keyfilepath == NULL)
+	{
+		usage(argv[0]);
+		fprintf(stderr, "ERROR: No key file specified.\n");
+		exit(1);
+	}
+
+	keyfilefd = open(keyfilepath, O_RDONLY);
+	if(keyfilefd < 0)
+	{
+		perror("open()");
+		exit(1);
 	}
 
 	// Set up socket to listen on
