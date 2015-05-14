@@ -395,7 +395,7 @@ void *handleConnectionThread(void *c)
 				char *devname = buffer + 16;
 				int i;
 
-				printf("pass 0. Checking for key\n");
+				printf("pass 0. Checking for key. nread = %d\n", nread);
 
 				memcpy(key,buffer,16);
 				
@@ -403,8 +403,19 @@ void *handleConnectionThread(void *c)
 					printf("%02x ", (int)(key[i] & 0xff));
 
 
-				free(buffer);
 				pass = 1;
+
+				if(nread > 32)
+				{
+					memcpy(buffer,buffer+32, nread-32);
+					nread -= 32;
+				}
+				else
+				{
+					free(buffer);
+					printf("moving on\n");
+					continue;
+				}
 			}
 
 			// When we get a packet from one of the associated VPN

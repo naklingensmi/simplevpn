@@ -258,6 +258,7 @@ int get_ip_from_server(int net_fd, char *devname)
 	iphdr->vers = 0x45 ;
 	iphdr->ip_header_len = 20 ;
 	iphdr->ttl = 64;
+	printf("sending IP request\n");
 	if(cwrite(net_fd, buffer, 20) <= 0)
 	{
 		printf("error: write failed while getting IP address from server\n");
@@ -334,12 +335,10 @@ int main(int argc, char **argv)
 			strcpy(nodename,optarg);
 			break;
 		case 'k':
-			// This doesn't work.
 			for(n = 0 ; n < 16 ; n++)
 			{
-				printf("optarg[%d] = %c\n", 2*n, optarg[2*n]);
-				key[n] = (optarg[2*n] > '9' ? (optarg[2*n] > 'F' ? optarg[2*n] - 'a' : optarg[2*n] - 'A') : optarg[2*n] - '0') << 4;
-				key[n] |= (optarg[2*n+1] > '9' ? (optarg[2*n+1] > 'F' ? optarg[2*n+1] - 'a' : optarg[2*n+1] - 'A') : optarg[2*n+1] - '0');
+				key[n] = (optarg[2*n] > '9' ? (optarg[2*n] > 'F' ? optarg[2*n] - 'a'+10 : optarg[2*n] - 'A'+10) : optarg[2*n] - '0') << 4;
+				key[n] |= (optarg[2*n+1] > '9' ? (optarg[2*n+1] > 'F' ? optarg[2*n+1] - 'a'+10 : optarg[2*n+1] - 'A'+10) : optarg[2*n+1] - '0');
 			}
 
 			for(n = 0 ; n < 16 ; n++)
@@ -367,8 +366,6 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-//	printf("New tun device = %s\n", devname) ;
-
 	if ( (sock_fd = socket(AF_INET, socktype, 0)) < 0) {
 		perror("socket()");
 		exit(1);
@@ -387,8 +384,6 @@ int main(int argc, char **argv)
 	sprintf(port_str, "%d", (int)(port & 0xffff));
 	getaddrinfo(server_domain, port_str, hints, &result);
 	memcpy(&remote, result->ai_addr, sizeof(struct sockaddr_in));
-//	printf("domain = %s\nIP = %08x\n", server_domain, ((struct sockaddr_in*)result->ai_addr)->sin_addr.s_addr);
-
 
 	/* connection request */
 	if (connect(sock_fd, (struct sockaddr*) &remote, sizeof(remote)) < 0)
@@ -399,6 +394,17 @@ int main(int argc, char **argv)
 
 	net_fd = sock_fd;
 	printf("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
+
+	// Send key + client ID
+	buffer = malloc(32);
+	memset(buffer,0,32);
+	memcpy(buffer, key,16); // copy the key into buffer
+	if(cwrite(net_fd, buffer, 32) <= 0)
+	{
+		printf("error: write failed while sending AES key to server\n");
+		exit(1);
+	}
+	free(buffer);
 
 	if(ip == 0)
 	{
