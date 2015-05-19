@@ -16,7 +16,7 @@
 #include <unistd.h>
 #include <net/route.h>
 #include <netdb.h>
-
+#include "md5.h"
 
 struct ip_header
 {
@@ -284,6 +284,7 @@ int get_ip_from_server(int net_fd, char *devname)
 void usage(char *progname)
 {
 	printf("%s: simpleVPN client application\n\n", progname);
+	printf("\t-k <key>\tRequired. Specify 16-byte AES key in hexadecimal format\n");
 	printf("\t-s <server ip>\tRequired. Specify server address\n");
 	printf("\t-a <local ip>\tOptional. Request static address on the VPN\n");
 	printf("\t-p <port>\tOptional. Specify port on which the server listens.\n");
@@ -310,7 +311,7 @@ int main(int argc, char **argv)
 	int c ;
 	struct addrinfo *hints = malloc(sizeof(struct addrinfo));
 	struct addrinfo *result = malloc(sizeof(struct addrinfo));
-	char key[16];
+	char *key = NULL;
 	char *nodename = NULL;
 
 	while ((c = getopt (argc, argv, "us:a:p:n:k:")) != -1)
@@ -335,6 +336,7 @@ int main(int argc, char **argv)
 			strcpy(nodename,optarg);
 			break;
 		case 'k':
+			key = malloc(16);
 			for(n = 0 ; n < 16 ; n++)
 			{
 				key[n] = (optarg[2*n] > '9' ? (optarg[2*n] > 'F' ? optarg[2*n] - 'a'+10 : optarg[2*n] - 'A'+10) : optarg[2*n] - '0') << 4;
@@ -359,6 +361,18 @@ int main(int argc, char **argv)
 		return -1 ;
 	}
 
+	if(nodename == NULL)
+	{
+		usage(argv[0]);
+		printf("Please specify a node name using the -n argument\n");
+		return -1 ;
+	}
+	if(key == NULL)
+	{
+		usage(argv[0]);
+		printf("Please specify a key using the -k argument\n");
+		return -1;
+	}
 	if(tun_fd <= 0)
 	{
 		printf("Could not create tun device.\nPlease make sure you are running as root and that the tun kernel module is loaded.\n") ;
@@ -398,7 +412,7 @@ int main(int argc, char **argv)
 	buffer = malloc(strlen(nodename)+2);
 	memset(buffer,0,strlen(nodename)+2);
 	strcpy(buffer, nodename);
-	if(cwrite(net_fd, buffer, 32) <= 0)
+	if(cwrite(net_fd, buffer, strlen(nodename)) <= 0)
 	{
 		printf("error: write failed while sending AES key to server\n");
 		exit(1);
@@ -409,7 +423,6 @@ int main(int argc, char **argv)
 	fd_set rd_set ;
 	struct timeval timeout;
 
-	// If we come close to timing out, we will send a keep-alive packet.
 	timeout.tv_sec = SOCK_TIMEOUT / 4;
 	timeout.tv_usec = 0;
 
@@ -425,11 +438,26 @@ int main(int argc, char **argv)
 	}
 	ioctl(net_fd, FIONREAD,&n);
 
-	buffer = malloc(n+4);
-	
-	nread = read(net_fd, buffer, n);
-	printf("Challenge: Got \"%s\" from server\n", buffer);
+	buffer = malloc(n+16+4); // malloc space for the challenge plus key (which takes 16 bytes) plus 4 bytes extra
 
+	nread = read(net_fd, buffer, n);
+	memcpy(buffer+nread, key,16); // Append AES key to end of buffer challenge
+	printf("Challenge: Got \"%s\" from server\n", buffer);
+	MD5_CTX md5_ctx;
+	unsigned char *md5_result = malloc(16);
+	MD5_Init(&md5_ctx);
+	MD5_Update(&md5_ctx, buffer, nread+16); // MD5 challenge plus key
+	MD5_Final(md5_result, &md5_ctx);
+	printf("md5 of \"%s\" is: ", buffer);
+
+	for(n = 0 ; n < 16 ; n++)
+		printf("%02x", ((int)md5_result[n]) & 0xff);
+
+	printf("\n");
+	// Send MD5 back...
+	cwrite(net_fd, (char*)md5_result, 16);
+	free(buffer);
+	free(md5_result);
 
 	if(ip == 0)
 	{

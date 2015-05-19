@@ -332,7 +332,7 @@ while(keyExchangeState != DONE)
 		if(ret == 0)
 		{
 			// Select timeout.
-			printf("Select timeout.\n");
+			printf("Select timeout when getting AES key exchange.\n");
 			return -1;
 		}
 
@@ -375,6 +375,7 @@ while(keyExchangeState != DONE)
 		return -2;
 	}
 }
+	return 0;
 }
 
 /*
