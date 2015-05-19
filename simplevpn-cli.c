@@ -352,7 +352,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-
 	if(server_domain == NULL)
 	{
 		usage(argv[0]);
@@ -385,7 +384,7 @@ int main(int argc, char **argv)
 	getaddrinfo(server_domain, port_str, hints, &result);
 	memcpy(&remote, result->ai_addr, sizeof(struct sockaddr_in));
 
-	/* connection request */
+	// connection request
 	if (connect(sock_fd, (struct sockaddr*) &remote, sizeof(remote)) < 0)
 	{
 		perror("connect()");
@@ -395,16 +394,42 @@ int main(int argc, char **argv)
 	net_fd = sock_fd;
 	printf("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
 
-	// Send key + client ID
-	buffer = malloc(32);
-	memset(buffer,0,32);
-	memcpy(buffer, key,16); // copy the key into buffer
+	// Send client ID
+	buffer = malloc(strlen(nodename)+2);
+	memset(buffer,0,strlen(nodename)+2);
+	strcpy(buffer, nodename);
 	if(cwrite(net_fd, buffer, 32) <= 0)
 	{
 		printf("error: write failed while sending AES key to server\n");
 		exit(1);
 	}
 	free(buffer);
+	
+	// Receive a challenge...
+	fd_set rd_set ;
+	struct timeval timeout;
+
+	// If we come close to timing out, we will send a keep-alive packet.
+	timeout.tv_sec = SOCK_TIMEOUT / 4;
+	timeout.tv_usec = 0;
+
+	FD_ZERO(&rd_set) ;
+	FD_SET(net_fd,&rd_set);
+
+	int ret = select(net_fd + 1, &rd_set, NULL, NULL, &timeout);
+
+	if (ret < 0)
+	{
+		perror("select()");
+		exit(1);
+	}
+	ioctl(net_fd, FIONREAD,&n);
+
+	buffer = malloc(n+4);
+	
+	nread = read(net_fd, buffer, n);
+	printf("Challenge: Got \"%s\" from server\n", buffer);
+
 
 	if(ip == 0)
 	{

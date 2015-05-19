@@ -298,6 +298,85 @@ void cleanup(struct client *cli)
 	pthread_mutex_unlock(&client_list_mutex);
 }
 
+int handleAESKeyExchange(int net_fd)
+{
+	int i, n;
+	char *buffer;
+	fd_set rd_set ;
+	struct timeval timeout;
+	enum {GET_DEV_NAME, SEND_CHALLENGE, RECEIVE_RESPONSE, DONE} keyExchangeState = GET_DEV_NAME;
+
+while(keyExchangeState != DONE)
+{
+	switch(keyExchangeState)
+	{
+	case GET_DEV_NAME:
+	case RECEIVE_RESPONSE:
+		FD_ZERO(&rd_set) ;
+		FD_SET(net_fd,&rd_set);
+
+		timeout.tv_sec = 10;
+		timeout.tv_usec = 0;
+
+		int ret = select(net_fd + 1, &rd_set, NULL, NULL, &timeout);
+
+		if (ret < 0 && errno == EINTR)
+			continue;
+
+		if (ret < 0)
+		{
+			perror("select()");
+			exit(1);
+		}
+
+		if(ret == 0)
+		{
+			// Select timeout.
+			printf("Select timeout.\n");
+			return -1;
+		}
+
+		// If we got data from the net socket...
+		if(FD_ISSET(net_fd, &rd_set))
+		{
+			ioctl(net_fd, FIONREAD,&n);
+
+			buffer = malloc(n+4);
+			
+			int nread = read(net_fd, buffer, n);
+
+			printf("Received \"%s\" from client\n", buffer);
+
+			// If we just got the node name, send back a challenge.
+			if(keyExchangeState == GET_DEV_NAME)
+			{
+				write(net_fd, buffer, strlen(buffer)+1);
+				keyExchangeState = RECEIVE_RESPONSE;
+			}
+			else
+			{
+				// perform md5, etc...
+				printf("Performing MD5 hash on challenge and comparing to response from client...\n");
+				keyExchangeState = DONE;
+			}
+
+			free(buffer);
+
+		}
+		else
+		{
+			fprintf(stderr, "Key exchange failed in select()\n");
+			return -3;
+		}
+		break;
+	case SEND_CHALLENGE:
+		break;
+	default:
+		return -2;
+	}
+}
+}
+
 /*
  * handleConnectionThread
  *
@@ -334,7 +413,9 @@ void *handleConnectionThread(void *c)
 	{
 		perror("setsockopt()");
 	}
-
+	
+	handleAESKeyExchange(net_fd);
+	
 	int maxfd = net_fd;	
 	while(1)
 	{
@@ -391,23 +472,11 @@ void *handleConnectionThread(void *c)
 
 			if(pass == 0)
 			{
-				char key[16];
-				char *devname = buffer + 16;
-				int i;
+				handleAESKeyExchange(net_fd);
 
-				printf("pass 0. Checking for key. nread = %d\n", nread);
-
-				memcpy(key,buffer,16);
-				
-				for(i = 0 ; i < 16 ; i++)
-					printf("%02x ", (int)(key[i] & 0xff));
-
-
-				pass = 1;
-
-				if(nread > 32)
+				if(nread > strlen(buffer))
 				{
-					memcpy(buffer,buffer+32, nread-32);
+					memcpy(buffer,buffer+strlen(buffer), nread-strlen(buffer));
 					nread -= 32;
 				}
 				else
@@ -416,6 +485,7 @@ void *handleConnectionThread(void *c)
 					printf("moving on\n");
 					continue;
 				}
+				pass = 1;
 			}
 
 			// When we get a packet from one of the associated VPN
